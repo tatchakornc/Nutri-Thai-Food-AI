@@ -1,0 +1,82 @@
+// Firestore Security Rules for NutriThaiFood AI
+// Deploy with: firebase deploy --only firestore:rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper functions ────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'age',
+                                  'gender', 'heightCm', 'weightKg',
+                                  'activityLevel', 'goal',
+                                  'dailyCalorieTarget', 'dailyProteinTarget',
+                                  'dailyCarbTarget', 'dailyFatTarget'])
+          && data.age is int && data.age > 0 && data.age < 150
+          && data.heightCm is number && data.heightCm > 0
+          && data.weightKg is number && data.weightKg > 0;
+    }
+
+    // ─── Users ───────────────────────────────────────────────────────────────
+    // users/{userId}  — only the owner can read/write their own profile
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile();
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+
+      // ─── Food Logs ─────────────────────────────────────────────────────────
+      // users/{userId}/foodLogs/{logId}
+      match /foodLogs/{logId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+            && request.resource.data.userId == userId;
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+
+      // ─── Water Logs ────────────────────────────────────────────────────────
+      // users/{userId}/waterLogs/{date}   (date = yyyy-MM-dd)
+      match /waterLogs/{date} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId);
+      }
+
+      // ─── Quests ────────────────────────────────────────────────────────────
+      // users/{userId}/quests/{questId}
+      match /quests/{questId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId);
+      }
+
+      // ─── Streak ────────────────────────────────────────────────────────────
+      // users/{userId}/streak/data
+      match /streak/{docId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId);
+      }
+    }
+
+    // ─── Foods (Thai nutrition database) ─────────────────────────────────────
+    // Any authenticated user can read; only admins can write (via Firebase Console or Cloud Functions)
+    match /foods/{foodId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Write via Firebase Admin SDK only
+    }
+
+    // ─── Ingredients (per-100g data) ─────────────────────────────────────────
+    match /ingredients/{ingredientId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Write via Firebase Admin SDK only
+    }
+  }
+}
